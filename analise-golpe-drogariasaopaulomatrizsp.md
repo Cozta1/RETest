@@ -37,7 +37,7 @@ Loja WooCommerce clonada da marca Drogaria São Paulo, com o módulo de pagament
 - **Hospedagem distinta da loja:** **Vercel**. `CNAME → ba8525e53af3315a.vercel-dns-016.com`, IPs `216.150.1.129`/`216.150.16.129`, header `server: Vercel`.
 - **Framework:** **Next.js** (caminho `/_next/static` presente; `favicon.ico` responde 200).
 - **Rotas:** raiz `/` e ~30 caminhos comuns (`/pay`, `/pix`, `/checkout`, `/pagar`, `/qrcode`, `/api/pix`, `/status`, `/callback`, `/webhook`, `/retorno`, etc.) retornam **404**.
-- **Conclusão sobre as rotas:** o app só atende em **rota dinâmica por pedido** (provável `/{token}` ou `/pay/{id}` gerado no momento da compra). O HTML público da loja **não referencia** o subdomínio — o link é gerado no servidor ao fechar o pedido, por isso não é enumerável publicamente sem criar um pedido real.
+- **Rota real CONFIRMADA:** `/pay/[checkoutid]` — vista no trace de rede do app (`/_next/static/chunks/app/pay/%5Bcheckoutid%5D/layout-*.js`). Ou seja, é rota dinâmica por pedido (um `checkoutid` gerado no momento da compra). O HTML público da loja **não referencia** o subdomínio — o link é gerado no servidor ao fechar o pedido, por isso não é enumerável publicamente sem criar um pedido real.
 
 ## 5. Arquitetura do golpe ("o processo por trás")
 
@@ -47,6 +47,24 @@ Loja WooCommerce clonada da marca Drogaria São Paulo, com o módulo de pagament
 4. Geram feeds (AdTribes) para **anunciar** em Google/Meta e atrair tráfego.
 5. No checkout, desviam o pagamento para um **app Next.js na Vercel** separado. Desacoplar significa: se a loja cair, o coletor de pagamento sobrevive (e vice-versa), e dificulta ligar o dinheiro ao site.
 6. O recebedor real (chave PIX / CNPJ) só aparece ao gerar uma cobrança — **não foi gerada** nesta análise para não inserir dados pessoais.
+
+## 5b. Captura do pagamento — PIX decodificado (prova-chave)
+
+Pedido de teste feito **manualmente no navegador pelo operador** (sem pagar). O "PIX copia e cola" gerado foi decodificado offline (`pix_decode.py`). CRC16 **válido** (`4EDC`), payload autêntico.
+
+| Campo PIX (EMV) | Valor |
+|---|---|
+| Tipo | **Dinâmico / uso único** (campo 01 = 12) |
+| Valor | **R$ 77,75** |
+| **Recebedor (nome)** | **`NEW LEVEL LTDA`** |
+| Cidade do recebedor | **SÃO PAULO** |
+| **PSP / gateway** | **Pagsmile** — `qrcode.pagsmile.com.br/qrs1/v2/010IjMxwqYaLO1YzG5xVrC1NWxAZZHTxzUaDgnD76c8EY6` |
+| Chave PIX | ausente (dinâmico via PSP — fundos roteiam pela Pagsmile até o estabelecimento) |
+| txid | `***` (mascarado) |
+
+**Significado:** o dinheiro **não** vai direto para uma chave PIX pessoal; passa pela **Pagsmile** (processador de pagamentos legítimo) até a conta do estabelecimento **NEW LEVEL LTDA**. A Pagsmile é obrigada a ter **KYC** (CNPJ, responsável, conta de liquidação) desse recebedor — por isso a denúncia ao compliance da Pagsmile é o caminho mais rápido para **congelar o recebimento e identificar o CNPJ** por trás do golpe.
+
+> Observação: "NEW LEVEL LTDA" é o nome do estabelecimento cadastrado no PSP. Pode ser a empresa do golpista, uma empresa-laranja ou um sub-merchant. Isso só a Pagsmile/Bacen confirmam. Evidência visual em `evidencia-pix-qrcode.png`.
 
 ## 6. Indicadores (IOCs)
 
@@ -60,11 +78,15 @@ CNAME pagamento  : ba8525e53af3315a.vercel-dns-016.com
 Registrador      : Hosting Concepts B.V. d/b/a Registrar.eu
 Criado em        : 2026-10-07
 Stack loja       : WordPress 7.0.2 + WooCommerce + Woodmart (Hostinger)
-Stack pagamento  : Next.js (Vercel)
+Stack pagamento  : Next.js (Vercel), rota /pay/[checkoutid]
+PSP / gateway    : Pagsmile (qrcode.pagsmile.com.br)
+Recebedor PIX    : NEW LEVEL LTDA - SAO PAULO
+URL PIX dinamico : qrcode.pagsmile.com.br/qrs1/v2/010IjMxwqYaLO1YzG5xVrC1NWxAZZHTxzUaDgnD76c8EY6
 ```
 
 ## 7. Canais de denúncia recomendados
 
+- **Pagsmile — compliance/abuse (PRIORIDADE):** o PSP tem KYC do recebedor `NEW LEVEL LTDA`. Denúncia de fraude/estelionato pode **bloquear o repasse** e expor o CNPJ. Contato via `compliance@pagsmile.com` / canal de denúncia no site da Pagsmile; informe a URL `qrcode.pagsmile.com.br/qrs1/v2/010IjMxwqYaLO1YzG5xVrC1NWxAZZHTxzUaDgnD76c8EY6`, o valor (R$77,75) e o site de origem.
 - **Cloudflare abuse** (esconde o IP de origem): https://abuse.cloudflare.com/ → categoria Phishing. Peça o IP de origem e o provedor.
 - **Vercel abuse** (hospeda o coletor de pagamento): security/abuse da Vercel, informando o subdomínio `pagamento.*`.
 - **Hostinger abuse:** abuse@hostinger.com (hospedagem de origem provável).
